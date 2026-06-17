@@ -76,7 +76,9 @@ This builds:
 | :--- | :--- | :--- |
 | `-c` | `--config <file>` | Path to a JSON configuration file. Overrides individual CLI flags. |
 | `-s` | `--sprites <path>` | Path, directory, or wildcard pattern for the source sprites. |
+| | |  -if pattern is used it MUST be enclosed in quotes i.e. "example/Regions/*.png" |
 | `-a` | `--atlases <path>` | Path, directory, or wildcard pattern for the atlases to scan. |
+| | |  -if pattern is used it MUST be enclosed in quotes i.e. "CoffeeBeaners/CoffeeBean*.png" |
 | `-r` | `--recurse` | Recursively scan subdirectories for sprites and atlases. |
 | `-o` | `--output <file>` | Output file path (omit or use `-` for stdout). |
 | `-f` | `--format <type>` | Output format. Options: `json` (default), `tsv`, `csv`, `xml`. |
