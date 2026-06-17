@@ -25,7 +25,13 @@ AtlasScout is a high-performance, plugin-based utility designed to locate sprite
 │   ├── Logger.hpp            # Logging utility
 │   ├── bitwisexor_avx2.h     # AVX2 plugin definition
 │   ├── bitwisexor_avx512.h   # AVX-512 plugin definition
-│   └── bitwisexor_fallback.h # Fallback plugin definition
+│   ├── bitwisexor_fallback.h # Fallback plugin definition
+|   └──extern/                # External libraries
+|       ├──ArgsParser.hpp     # Custom CLI Argument Parser header
+|       ├── ...               # Other external libraries
+|                             #   -stb-image (Author: Sean Barrett)
+|                             #   -nlohmann-json (Author: Niels Lohmann)
+|
 ├── src/                      # Source code
 │   ├── main.cpp              # CLI launcher and plugin resolver
 │   ├── searcher.cpp          # Search coordinator & threadpool scheduling
