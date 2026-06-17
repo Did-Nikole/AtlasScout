@@ -1,7 +1,7 @@
 # ==============================================================================
 # AtlasScout - Makefile
 # ==============================================================================
-# atlasscout extracts precise, bounded intervals of lines from a stream or file.
+# atlasscout locates sprite images within larger sprite sheets (atlases).
 # This Makefile builds the project using C++20.
 
 # Compiler and Flags
@@ -111,19 +111,19 @@ re: fclean all
 # ------------------------------------------------------------------------------
 
 # Install the application and the man page
-install: all midd.1
+install: all atlasscout.1
 	mkdir -p $(DESTDIR)$(BINDIR)
 	mkdir -p $(DESTDIR)$(MANDIR)
 	cp -f $(TARGET) $(DESTDIR)$(BINDIR)/$(TARGET)
 	chmod 755 $(DESTDIR)$(BINDIR)/$(TARGET)
-	cp -f midd.1 $(DESTDIR)$(MANDIR)/midd.1
-	chmod 644 $(DESTDIR)$(MANDIR)/midd.1
+	cp -f atlasscout.1 $(DESTDIR)$(MANDIR)/atlasscout.1
+	chmod 644 $(DESTDIR)$(MANDIR)/atlasscout.1
 	@echo "Installed $(TARGET) to $(DESTDIR)$(BINDIR) and man page to $(DESTDIR)$(MANDIR)"
 
 # Uninstall the application and the man page
 uninstall:
 	rm -f $(DESTDIR)$(BINDIR)/$(TARGET)
-	rm -f $(DESTDIR)$(MANDIR)/midd.1
+	rm -f $(DESTDIR)$(MANDIR)/atlasscout.1
 	@echo "Uninstalled $(TARGET) and man page."
 
 # ------------------------------------------------------------------------------
@@ -135,7 +135,7 @@ deb: all
 	@NEW_VERSION=$$(awk -F: '/version/ {print $$2}' version); \
 	$(MAKE) build-deb PACKAGE_VERSION=$$NEW_VERSION
 
-build-deb: all midd.1
+build-deb: all atlasscout.1
 	@echo "Building Debian package version $(PACKAGE_VERSION)..."
 	rm -rf $(DEB_STAGE_DIR)
 	mkdir -p $(DEB_STAGE_DIR)/DEBIAN
@@ -144,8 +144,8 @@ build-deb: all midd.1
 	# Copy files to staging area
 	cp -f $(TARGET) $(DEB_STAGE_DIR)/usr/bin/$(TARGET)
 	chmod 755 $(DEB_STAGE_DIR)/usr/bin/$(TARGET)
-	cp -f midd.1 $(DEB_STAGE_DIR)/usr/share/man/man1/midd.1
-	chmod 644 $(DEB_STAGE_DIR)/usr/share/man/man1/midd.1
+	cp -f atlasscout.1 $(DEB_STAGE_DIR)/usr/share/man/man1/atlasscout.1
+	chmod 644 $(DEB_STAGE_DIR)/usr/share/man/man1/atlasscout.1
 	# Generate DEBIAN/control file
 	@echo "Package: $(PACKAGE_NAME)" > $(DEB_STAGE_DIR)/DEBIAN/control
 	@echo "Version: $(PACKAGE_VERSION)" >> $(DEB_STAGE_DIR)/DEBIAN/control
@@ -171,19 +171,19 @@ rpm: all
 	@NEW_VERSION=$$(awk -F: '/version/ {print $$2}' version); \
 	$(MAKE) build-rpm PACKAGE_VERSION=$$NEW_VERSION
 
-build-rpm: all midd.1
+build-rpm: all atlasscout.1
 	@echo "Building RPM package version $(PACKAGE_VERSION)..."
 	rm -rf $(RPM_STAGE_DIR)
 	mkdir -p $(RPM_STAGE_DIR)/SPECS
 	mkdir -p $(RPM_STAGE_DIR)/SOURCES
 	# Copy target and man page to SOURCES
 	cp -f $(TARGET) $(RPM_STAGE_DIR)/SOURCES/$(TARGET)
-	cp -f midd.1 $(RPM_STAGE_DIR)/SOURCES/midd.1
-	# Generate SPECS/midd.spec file
+	cp -f atlasscout.1 $(RPM_STAGE_DIR)/SOURCES/atlasscout.1
+	# Generate SPECS/atlasscout.spec file
 	@echo "Name:           $(PACKAGE_NAME)" > $(RPM_STAGE_DIR)/SPECS/$(PACKAGE_NAME).spec
 	@echo "Version:        $(PACKAGE_VERSION)" >> $(RPM_STAGE_DIR)/SPECS/$(PACKAGE_NAME).spec
 	@echo "Release:        1%{?dist}" >> $(RPM_STAGE_DIR)/SPECS/$(PACKAGE_NAME).spec
-	@echo "Summary:        Midd utility for cropping middle of files" >> $(RPM_STAGE_DIR)/SPECS/$(PACKAGE_NAME).spec
+	@echo "Summary:        AtlasScout utility for locating sprites inside sheets" >> $(RPM_STAGE_DIR)/SPECS/$(PACKAGE_NAME).spec
 	@echo "License:        GPL" >> $(RPM_STAGE_DIR)/SPECS/$(PACKAGE_NAME).spec
 	@echo "URL:            https://github.com/user/$(PACKAGE_NAME)" >> $(RPM_STAGE_DIR)/SPECS/$(PACKAGE_NAME).spec
 	@echo "" >> $(RPM_STAGE_DIR)/SPECS/$(PACKAGE_NAME).spec
@@ -194,18 +194,18 @@ build-rpm: all midd.1
 	@echo "mkdir -p %{buildroot}%{BINDIR}" >> $(RPM_STAGE_DIR)/SPECS/$(PACKAGE_NAME).spec
 	@echo "mkdir -p %{buildroot}%{MANDIR}" >> $(RPM_STAGE_DIR)/SPECS/$(PACKAGE_NAME).spec
 	@echo "cp -p %{_sourcedir}/$(TARGET) %{buildroot}%{BINDIR}/$(TARGET)" >> $(RPM_STAGE_DIR)/SPECS/$(PACKAGE_NAME).spec
-	@echo "cp -p %{_sourcedir}/midd.1 %{buildroot}%{MANDIR}/midd.1" >> $(RPM_STAGE_DIR)/SPECS/$(PACKAGE_NAME).spec
+	@echo "cp -p %{_sourcedir}/atlasscout.1 %{buildroot}%{MANDIR}/atlasscout.1" >> $(RPM_STAGE_DIR)/SPECS/$(PACKAGE_NAME).spec
 	@echo "" >> $(RPM_STAGE_DIR)/SPECS/$(PACKAGE_NAME).spec
 	@echo "%files" >> $(RPM_STAGE_DIR)/SPECS/$(PACKAGE_NAME).spec
 	@echo "%{BINDIR}/$(TARGET)" >> $(RPM_STAGE_DIR)/SPECS/$(PACKAGE_NAME).spec
-	@echo "%{MANDIR}/midd.1" >> $(RPM_STAGE_DIR)/SPECS/$(PACKAGE_NAME).spec
+	@echo "%{MANDIR}/atlasscout.1" >> $(RPM_STAGE_DIR)/SPECS/$(PACKAGE_NAME).spec
 	# Build the package
 	mkdir -p $(DIST_DIR)
 	rpmbuild --define "_topdir $(CURDIR)/$(RPM_STAGE_DIR)" --define "BINDIR $(BINDIR)" --define "MANDIR $(MANDIR)" -bb $(RPM_STAGE_DIR)/SPECS/$(PACKAGE_NAME).spec
 	cp -f $(RPM_STAGE_DIR)/RPMS/$(RPM_ARCH)/$(PACKAGE_NAME)-$(PACKAGE_VERSION)-1.$(RPM_ARCH).rpm $(DIST_DIR)/
 	@echo "RPM package successfully built: $(DIST_DIR)/$(PACKAGE_NAME)-$(PACKAGE_VERSION)-1.$(RPM_ARCH).rpm"
 
-midd.1: midd.1.md version
-	pandoc -s -t man -M footer="Version $(PACKAGE_VERSION)" midd.1.md -o midd.1
+atlasscout.1: atlasscout.1.md version
+	pandoc -s -t man -M footer="Version $(PACKAGE_VERSION)" atlasscout.1.md -o atlasscout.1
 
 .PHONY: all debug clean fclean re install uninstall deb rpm build-deb build-rpm
