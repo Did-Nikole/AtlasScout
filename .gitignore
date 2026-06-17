@@ -21,3 +21,4 @@ example_main
 compile_commands.json
 
 tests
+debug.log

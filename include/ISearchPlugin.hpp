@@ -31,7 +31,7 @@ public:
    * position
    */
   virtual bool bitwise_xor_match(const uint32_t *, int, const uint32_t *,
-                                 const uint32_t *, int, int, int, int) = 0;
+                                 int, int, int, int) = 0;
 };
 
 // Define a standardized type for the C-style factory function

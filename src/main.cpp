@@ -32,14 +32,26 @@ bool loadConfig(std::string filename, Config &config,
     return false;
   }
 
+  std::filesystem::path config_dir = std::filesystem::path(filename).parent_path();
+
   // Parse atlas_source
   if (j.contains("atlas_source") && j["atlas_source"].is_string()) {
-    config.atlaspath = j["atlas_source"].get<std::string>();
+    std::filesystem::path p = j["atlas_source"].get<std::string>();
+    if (p.is_relative() && !config_dir.empty()) {
+      config.atlaspath = (config_dir / p).string();
+    } else {
+      config.atlaspath = p.string();
+    }
   }
 
   // Parse sprite_source
   if (j.contains("sprite_source") && j["sprite_source"].is_string()) {
-    config.spritespath = j["sprite_source"].get<std::string>();
+    std::filesystem::path p = j["sprite_source"].get<std::string>();
+    if (p.is_relative() && !config_dir.empty()) {
+      config.spritespath = (config_dir / p).string();
+    } else {
+      config.spritespath = p.string();
+    }
   }
 
   // Parse recursive
@@ -74,10 +86,13 @@ bool loadConfig(std::string filename, Config &config,
   if (j.contains("output_file") && j["output_file"].is_string()) {
     std::string outstring = j["output_file"].get<std::string>();
     if (!outstring.empty() && outstring != "stdout" && outstring != "-") {
-      std::string full_path = outstring + "." + config.outputformat.suffix();
-      auto *outfile = new std::ofstream(full_path);
+      std::filesystem::path p = outstring + "." + config.outputformat.suffix();
+      if (p.is_relative() && !config_dir.empty()) {
+        p = config_dir / p;
+      }
+      auto *outfile = new std::ofstream(p);
       if (!outfile->is_open()) {
-        std::cerr << "Error: Cannot open output file '" << full_path
+        std::cerr << "Error: Cannot open output file '" << p.string()
                   << "': " << std::strerror(errno) << std::endl;
         delete outfile;
         return false;

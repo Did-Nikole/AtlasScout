@@ -17,7 +17,7 @@ int main() {
   // 4. Use the required methods
   if (plugin->is_supported()) {
     std::cout << "Loaded: " << plugin->get_name() << "\n";
-    plugin->bitwise_xor_match(nullptr, 0, nullptr, nullptr, 0, 0, 0, 0);
+    plugin->bitwise_xor_match(nullptr, 0, nullptr, 0, 0, 0, 0);
   }
 
   delete plugin;

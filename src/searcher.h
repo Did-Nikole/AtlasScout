@@ -1,8 +1,8 @@
 #pragma once
 #include "Config.hpp"
-#include <vector>
-#include <string>
 #include <iostream>
+#include <string>
+#include <vector>
 
 namespace searcher {
 struct Result {
@@ -14,6 +14,7 @@ struct Image {
   std::string path;
   int w;
   int h;
+  int rot;
   uint32_t *data;
 };
 
@@ -34,7 +35,7 @@ Result findSprites(std::string filepattern, bool recurse,
                    std::vector<std::string> &sprites);
 
 Result formatOutput(OutputFormat outType, std::ostream &outPtr,
-                    std::vector<AtlasMap> atlasMap);
+                    std::vector<AtlasMap> atlasMap, std::string pluginName);
 
 Image loadImage(std::string filepath, bool crop = false);
 
