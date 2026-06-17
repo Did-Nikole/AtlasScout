@@ -1,0 +1,1 @@
+AtlasScout is a fast, plugin-based utility designed to locate sprite images within larger sprite sheets (atlases). It is built with performance and flexibility in mind, supporting multiple optimized search algorithms via shared object plugins and providing seamless integration with standard Unix pipelines.
