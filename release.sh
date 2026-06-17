@@ -60,7 +60,7 @@ fi
 # 4. Create and push the Git tag
 echo "Creating and pushing Git tag ${TAG_NAME}..."
 git tag -a "${TAG_NAME}" -m "Release version ${CLEAN_VERSION}"
-git push main "${TAG_NAME}"
+git push origin "${TAG_NAME}"
 
 # 5. Create the GitHub release and upload both packages
 echo "Creating GitHub Release and uploading packages..."
