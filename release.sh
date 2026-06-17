@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ==============================================================================
-# Midd - Automated Release Script
+# AtlasScout - Automated Release Script
 # ==============================================================================
 # This script automates building the Debian and RPM packages with the version
 # read from the version file, tagging the commit, pushing the tag to GitHub,
@@ -28,7 +28,7 @@ CLEAN_VERSION="${VERSION#v}"
 TAG_NAME="v${CLEAN_VERSION}"
 
 echo "============================================="
-echo " Starting Release Process for Midd ${TAG_NAME}"
+echo " Starting Release Process for AtlasScout ${TAG_NAME}"
 echo "============================================="
 
 # 2. Verify that git working directory is clean
@@ -44,14 +44,14 @@ make rpm PACKAGE_VERSION="${CLEAN_VERSION}"
 
 # Check that the package files actually exist
 ARCH=$(dpkg --print-architecture 2>/dev/null || echo "amd64")
-DEB_FILE="dist/midd_${CLEAN_VERSION}_${ARCH}.deb"
+DEB_FILE="dist/atlasscout_${CLEAN_VERSION}_${ARCH}.deb"
 if [ ! -f "${DEB_FILE}" ]; then
     echo "Error: Debian package file ${DEB_FILE} was not created."
     exit 1
 fi
 
 RPM_ARCH=$(rpm --eval '%_arch' 2>/dev/null || uname -m)
-RPM_FILE="dist/midd-${CLEAN_VERSION}-1.${RPM_ARCH}.rpm"
+RPM_FILE="dist/atlasscout-${CLEAN_VERSION}-1.${RPM_ARCH}.rpm"
 if [ ! -f "${RPM_FILE}" ]; then
     echo "Error: RPM package file ${RPM_FILE} was not created."
     exit 1
