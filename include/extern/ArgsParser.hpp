@@ -30,7 +30,7 @@ class ArgsParser;
 /**
  * @brief Defines the supported data types for argument values.
  */
-enum class ArgType { STRING, INTEGER, BOOLEAN, DOUBLE, REGEX, ULONGLONG };
+enum class ArgType { STRING, INTEGER, BOOLEAN, DOUBLE, REGEX, ULONGLONG, VECTOR };
 
 /**
  * @brief Represents the values parsed from the command line.
@@ -135,6 +135,8 @@ static std::string argTypeToString(ArgType type) {
     return "REGEX";
   case ArgType::ULONGLONG:
     return "ULONGLONG";
+  case ArgType::VECTOR:
+    return "VECTOR";
   default:
     return "UNKNOWN";
   }
@@ -154,6 +156,8 @@ static bool isCompatible(ArgType type, const ArgValue &value) {
     return std::holds_alternative<std::vector<std::string>>(value);
   case ArgType::ULONGLONG:
     return std::holds_alternative<unsigned long long>(value);
+  case ArgType::VECTOR:
+    return std::holds_alternative<std::vector<std::string>>(value);
   default:
     return false;
   }
@@ -166,6 +170,8 @@ bool ArgsParser::addArgument(const ArgSpec &spec) {
   // Initialize default length based on type if not explicitly set
   if (modifiedSpec.length == -1) {
     if (modifiedSpec.type == ArgType::BOOLEAN) {
+      modifiedSpec.length = 0;
+    } else if (modifiedSpec.type == ArgType::VECTOR) {
       modifiedSpec.length = 0;
     } else {
       modifiedSpec.length = 1;
@@ -247,6 +253,10 @@ std::string ArgsParser::getCanonicalName(const ArgSpec &spec) const {
 std::optional<ArgValue>
 ArgsParser::processValue(const ArgSpec &spec,
                          const std::vector<std::string> &values) const {
+  if (spec.type == ArgType::VECTOR) {
+    return values;
+  }
+
   if (spec.length > 1) {
     if (spec.type == ArgType::STRING) {
       return values; // Variant handles vector<string> implicitly
@@ -396,7 +406,7 @@ bool ArgsParser::parse(
       results[canon] = spec.defaultValue.value();
     } else if (spec.type == ArgType::BOOLEAN) {
       results[canon] = false;
-    } else if (spec.type == ArgType::REGEX) {
+    } else if (spec.type == ArgType::REGEX || spec.type == ArgType::VECTOR) {
       results[canon] = std::vector<std::string>{};
     }
   }
@@ -416,11 +426,10 @@ bool ArgsParser::parse(
       }
 
       std::vector<std::string> values;
-      for (int j = 0; j < spec->length; ++j) {
-        if (i + 1 < argc) {
+      if (spec->type == ArgType::VECTOR) {
+        while (i + 1 < argc) {
           std::string nextArg = argv[i + 1];
-          // Check if it looks like a flag, but allow negative numbers as
-          // values.
+          // Check if it looks like a flag, but allow negative numbers as values.
           if ((nextArg.length() > 1 && nextArg[0] == '-' &&
                !std::isdigit(nextArg[1])) ||
               (nextArg.length() > 2 && nextArg.rfind("--", 0) == 0)) {
@@ -429,12 +438,27 @@ bool ArgsParser::parse(
           values.push_back(nextArg);
           i++; // Consume value
         }
-      }
+      } else {
+        for (int j = 0; j < spec->length; ++j) {
+          if (i + 1 < argc) {
+            std::string nextArg = argv[i + 1];
+            // Check if it looks like a flag, but allow negative numbers as
+            // values.
+            if ((nextArg.length() > 1 && nextArg[0] == '-' &&
+                 !std::isdigit(nextArg[1])) ||
+                (nextArg.length() > 2 && nextArg.rfind("--", 0) == 0)) {
+              break;
+            }
+            values.push_back(nextArg);
+            i++; // Consume value
+          }
+        }
 
-      if (values.size() != static_cast<size_t>(spec->length)) {
-        std::cerr << "Error: Argument '" << currentArg << "' requires "
-                  << spec->length << " values." << std::endl;
-        return false;
+        if (values.size() != static_cast<size_t>(spec->length)) {
+          std::cerr << "Error: Argument '" << currentArg << "' requires "
+                    << spec->length << " values." << std::endl;
+          return false;
+        }
       }
 
       std::optional<ArgValue> parsedOpt = processValue(*spec, values);
@@ -443,7 +467,7 @@ bool ArgsParser::parse(
         return false;
       }
 
-      if (spec->length <= 1 && !validateValue(*spec, parsedOpt.value())) {
+      if (spec->type != ArgType::VECTOR && spec->length <= 1 && !validateValue(*spec, parsedOpt.value())) {
         std::cerr << "ValidateValue failed for " << currentArg << std::endl;
         return false;
       }
@@ -517,7 +541,7 @@ void ArgsParser::showHelp() const {
 
     if (spec.required) {
       std::cout << " (REQUIRED)";
-    } else if (spec.defaultValue.has_value() && spec.type != ArgType::REGEX) {
+    } else if (spec.defaultValue.has_value() && spec.type != ArgType::REGEX && spec.type != ArgType::VECTOR) {
       std::cout << " (Default: ";
       if (std::holds_alternative<std::string>(spec.defaultValue.value())) {
         std::cout << std::get<std::string>(spec.defaultValue.value());
