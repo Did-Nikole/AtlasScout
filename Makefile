@@ -208,10 +208,4 @@ build-rpm: all midd.1
 midd.1: midd.1.md version
 	pandoc -s -t man -M footer="Version $(PACKAGE_VERSION)" midd.1.md -o midd.1
 
-# Test Target
-test:
-	@mkdir -p $(BUILD_DIR)
-	$(CXX) $(CXXFLAGS) tests/test_argsparser.cpp -o $(BUILD_DIR)/test_argsparser
-	./$(BUILD_DIR)/test_argsparser
-
-.PHONY: all debug clean fclean re install uninstall deb rpm build-deb build-rpm test
+.PHONY: all debug clean fclean re install uninstall deb rpm build-deb build-rpm

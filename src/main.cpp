@@ -1,21 +1,135 @@
 #define ARGSPARSERRENEWED_IMPLEMENTATION
 #include "ArgsParser.hpp"
 #include "ISearchPlugin.hpp"
+#include "Logger.hpp"
 #include "json.hpp"
+#include "Config.hpp"
+#include "searcher.h"
 #include <dlfcn.h>
 #include <filesystem>
+#include <fstream>
 #include <iostream>
 #include <map>
 #include <vector>
 
 using json = nlohmann::json;
 
-struct dlObjects {
-  ISearchPlugin *plugin;
-  void *handle;
-};
+bool loadConfig(std::string filename, Config &config,
+                const std::map<std::string, dlObjects> &sharedObjects) {
+  std::ifstream file(filename);
+  if (!file.is_open()) {
+    std::cerr << "Error: Cannot open config file '" << filename << "'"
+              << std::endl;
+    return false;
+  }
 
-void cleanup(std::map<std::string, dlObjects> &sharedObjects) {
+  json j;
+  try {
+    file >> j;
+  } catch (const json::parse_error &e) {
+    std::cerr << "Error: Failed to parse JSON config file: " << e.what()
+              << std::endl;
+    return false;
+  }
+
+  // Parse atlas_source
+  if (j.contains("atlas_source") && j["atlas_source"].is_string()) {
+    config.atlaspath = j["atlas_source"].get<std::string>();
+  }
+
+  // Parse sprite_source
+  if (j.contains("sprite_source") && j["sprite_source"].is_string()) {
+    config.spritespath = j["sprite_source"].get<std::string>();
+  }
+
+  // Parse recursive
+  if (j.contains("recursive") && j["recursive"].is_boolean()) {
+    config.recurse = j["recursive"].get<bool>();
+  }
+
+  // Parse quiet
+  if (j.contains("quiet") && j["quiet"].is_boolean()) {
+    config.quiet = j["quiet"].get<bool>();
+  }
+
+  // Parse output_format
+  if (j.contains("output_format") && j["output_format"].is_string()) {
+    std::string format = j["output_format"].get<std::string>();
+    if (format == "json") {
+      config.outputformat = OutputFormat::JSON;
+    } else if (format == "tsv") {
+      config.outputformat = OutputFormat::TSV;
+    } else if (format == "csv") {
+      config.outputformat = OutputFormat::CSV;
+    } else if (format == "xml") {
+      config.outputformat = OutputFormat::XML;
+    } else {
+      std::cerr << "Error: Invalid output format in config: " << format
+                << std::endl;
+      return false;
+    }
+  }
+
+  // Parse output_file
+  if (j.contains("output_file") && j["output_file"].is_string()) {
+    std::string outstring = j["output_file"].get<std::string>();
+    if (!outstring.empty() && outstring != "stdout" && outstring != "-") {
+      std::string full_path = outstring + "." + config.outputformat.suffix();
+      auto *outfile = new std::ofstream(full_path);
+      if (!outfile->is_open()) {
+        std::cerr << "Error: Cannot open output file '" << full_path
+                  << "': " << std::strerror(errno) << std::endl;
+        delete outfile;
+        return false;
+      }
+      config.output_ptr = outfile;
+    }
+  }
+
+  // Parse rotations
+  if (j.contains("rotations") && j["rotations"].is_array()) {
+    config.rotations.clear();
+    for (const auto &item : j["rotations"]) {
+      if (item.is_number_integer()) {
+        config.rotations.push_back(item.get<int>());
+      }
+    }
+  }
+
+  // Parse search_type
+  if (j.contains("search_type") && j["search_type"].is_string()) {
+    std::string type = j["search_type"].get<std::string>();
+    if (sharedObjects.contains(type)) {
+      config.searchMethod = sharedObjects.at(type).plugin;
+    } else {
+      std::cerr << "Error: Invalid search type in config: " << type
+                << std::endl;
+      return false;
+    }
+  } else {
+    // Select highest priority plugin
+    if (sharedObjects.empty()) {
+      std::cerr << "Error: No search types available." << std::endl;
+      return false;
+    } else {
+      auto highestIt = sharedObjects.begin();
+      for (auto it = sharedObjects.begin(); it != sharedObjects.end(); ++it) {
+        if (it->second.plugin->priority() >
+            highestIt->second.plugin->priority()) {
+          highestIt = it;
+        }
+      }
+      config.searchMethod = highestIt->second.plugin;
+    }
+  }
+
+  return true;
+}
+
+void cleanup(std::map<std::string, dlObjects> &sharedObjects, Config config) {
+  if (config.output_ptr != &std::cout) {
+    delete config.output_ptr;
+  }
   for (auto &pair : sharedObjects) {
     delete pair.second.plugin;
     dlclose(pair.second.handle);
@@ -25,20 +139,17 @@ void cleanup(std::map<std::string, dlObjects> &sharedObjects) {
 
 int main(int argc, char **argv) {
 
+  Logger &log = Logger::getInstance();
+  log.init("debug.log", true);
+
+  log.log("Starting atlasscout");
+
   std::map<std::string, std::optional<ArgValue>> results;
   ArgsParser parser;
 
   std::map<std::string, dlObjects> sharedObjects;
 
-  struct {
-    std::string spritespath;
-    std::string atlaspath;
-    bool recurse;
-    std::string outputpath;
-    std::string outputformat;
-    std::string searchtype;
-    bool quiet;
-  } config;
+  Config config;
 
   // Iterate over the plugins directory and check each plugin for availability
   // using the is_supported method and then load it into the sharedObjects map
@@ -110,15 +221,83 @@ int main(int argc, char **argv) {
                       .required = false,
                       .defaultValue = false});
 
+  parser.addArgument({.type = ArgType::STRING,
+                      .shortFlag = "-c",
+                      .longFlag = "--config",
+                      .description =
+                          "Path to a JSON configuration file. Overrides "
+                          "individual CLI flags.",
+                      .required = false,
+                      .defaultValue = ""});
+
+  parser.addArgument({.type = ArgType::STRING,
+                      .shortFlag = "-s",
+                      .longFlag = "--sprites",
+                      .description =
+                          "Path, directory, or pattern for the source "
+                          "sprites to search for.",
+                      .required = false,
+                      .defaultValue = ""});
+
+  parser.addArgument({.type = ArgType::STRING,
+                      .shortFlag = "-a",
+                      .longFlag = "--atlases",
+                      .description =
+                          "Path, directory, or pattern for the atlases "
+                          "(spritesheets) to scan.",
+                      .required = false,
+                      .defaultValue = ""});
+
+  parser.addArgument({.type = ArgType::BOOLEAN,
+                      .shortFlag = "-r",
+                      .longFlag = "--recurse",
+                      .description =
+                          "Recursively search subdirectories for both "
+                          "source sprites and atlases.",
+                      .required = false,
+                      .defaultValue = false});
+
+  parser.addArgument({.type = ArgType::STRING,
+                      .shortFlag = "-o",
+                      .longFlag = "--output",
+                      .description = "Output file path. If omitted or set to "
+                                     "`-`, defaults to `stdout`.",
+                      .required = false,
+                      .defaultValue = ""});
+
+  parser.addArgument({.type = ArgType::STRING,
+                      .shortFlag = "-f",
+                      .longFlag = "--format",
+                      .description = "Built-in output format. Options: `json` "
+                                     "(default), `tsv`, `csv`, `xml`.",
+                      .required = false,
+                      .defaultValue = ""});
+
+  parser.addArgument({.type = ArgType::STRING,
+                      .shortFlag = "-t",
+                      .longFlag = "--type",
+                      .description = "Force a specific search `.so` plugin "
+                                     "implementation (e.g., `avx2`).",
+                      .required = false,
+                      .defaultValue = ""});
+
+  parser.addArgument({.type = ArgType::BOOLEAN,
+                      .shortFlag = "-q",
+                      .longFlag = "--quiet",
+                      .description = "Suppress all progress/status messages "
+                                     "(silences `stderr`). Ideal for piping.",
+                      .required = false,
+                      .defaultValue = false});
+
   if (!parser.parse(argc, argv, results)) {
     parser.showHelp();
-    cleanup(sharedObjects);
+    cleanup(sharedObjects, config);
     return 1;
   }
 
   if (results["help"].has_value() && std::get<bool>(results["help"].value())) {
     parser.showHelp();
-    cleanup(sharedObjects);
+    cleanup(sharedObjects, config);
     return 0;
   }
 
@@ -127,33 +306,130 @@ int main(int argc, char **argv) {
     std::cout << "Available search plugins:" << std::endl;
     for (const auto &pair : sharedObjects)
       std::cout << pair.first << std::endl;
-    cleanup(sharedObjects);
+    cleanup(sharedObjects, config);
     return 0;
   }
 
   // check if user has specified either -c or -s and -a (if no -c)
+  if (results["config"].has_value() &&
+      !std::get<std::string>(results["config"].value()).empty()) {
+    if (!loadConfig(std::get<std::string>(results["config"].value()), config,
+                    sharedObjects)) {
+      std::cerr << "Error: Could not load config file: "
+                << "\n";
+      parser.showHelp();
+      cleanup(sharedObjects, config);
+      return 1;
+    }
+  } else if (results["atlases"].has_value() &&
+             !std::get<std::string>(results["atlases"].value()).empty() &&
+             results["sprites"].has_value() &&
+             !std::get<std::string>(results["sprites"].value()).empty()) {
+    // process all flags only if config not set, except -h and -l which are
+    // handled above
+    config.atlaspath = std::get<std::string>(results["atlases"].value());
+    config.spritespath = std::get<std::string>(results["sprites"].value());
+    if (results.contains("recurse"))
+      config.recurse = std::get<bool>(results["recurse"].value());
+    else
+      config.recurse = false;
+    if (results["format"].has_value()) {
+      auto format = std::get<std::string>(results["format"].value());
+      if (format == "json")
+        config.outputformat = OutputFormat::JSON;
+      else if (format == "tsv")
+        config.outputformat = OutputFormat::TSV;
+      else if (format == "csv")
+        config.outputformat = OutputFormat::CSV;
+      else if (format == "xml")
+        config.outputformat = OutputFormat::XML;
+      else {
+        std::cerr << "Error: Invalid format: " << format << std::endl;
+        cleanup(sharedObjects, config);
+        return 1;
+      }
+      if (results.contains("output")) {
+        auto outstring = std::get<std::string>(results.at("output").value());
+        if (outstring != "stdout") {
 
-  // build the config from json if -c specified else, use -s and -a (set
-  // rotations to [0,90,180,270], as no way to specify from cli atm)
+          auto *outfile =
+              new std::ofstream(outstring + "." + config.outputformat.suffix());
+          if (!outfile->is_open()) {
+            std::cerr << "Error: Cannot open output file '" << outstring
+                      << "': " << std::strerror(errno) << std::endl;
+            delete outfile;
+            cleanup(sharedObjects, config);
+            return 1;
+          }
+          config.output_ptr = outfile;
+        }
+      }
 
-  // is no -t specified, use the plugin with the highest priority ()
+    } else {
+      config.outputformat = OutputFormat::JSON;
+    }
 
-  // if -o specified set the config output to - else default to stdout
+    if (results["type"].has_value()) {
+      auto type = std::get<std::string>(results["type"].value());
+      if (sharedObjects.contains(type)) {
+        config.searchMethod = sharedObjects[type].plugin;
+      } else {
+        std::cerr << "Error: Invalid search type: " << type << std::endl;
+        cleanup(sharedObjects, config);
+        return 1;
+      }
+    } else {
+      if (sharedObjects.empty()) {
+        std::cerr << "Error: No search types available, check plugins folder "
+                     "is in samefolder as app and contains valid plugins."
+                  << std::endl;
+        cleanup(sharedObjects, config);
+        return 1;
+      } else {
+        auto highestIt = sharedObjects.begin();
+        for (auto it = sharedObjects.begin(); it != sharedObjects.end(); ++it) {
+          if (it->second.plugin->priority() >
+              highestIt->second.plugin->priority()) {
+            highestIt = it;
+          }
+        }
+        config.searchMethod = highestIt->second.plugin;
+      }
+    }
+    if (results["quiet"].has_value()) {
+      config.quiet = std::get<bool>(results["quiet"].value());
+    } else {
+      config.quiet = false;
+    }
 
-  // if -q specified set the config quiet to true else default to false
-
-  // call the search function with the config file.
-
-  if (!results["config"].has_value() &&
-      (!results["sprites"].has_value() || !results["atlases"].has_value())) {
+  } else {
     std::cerr << "Error: either -c <file> or -s <path> and -a <path> must be "
                  "specified."
               << std::endl;
     parser.showHelp();
-    cleanup(sharedObjects);
+    cleanup(sharedObjects, config);
     return 1;
   }
 
-  cleanup(sharedObjects);
+  // dump the config at this point just for sanity, might turn it off later
+  log.log("Config :" + config.to_string());
+  if (!config.quiet) {
+    std::cout << "Config :" + config.to_string() << std::endl;
+  }
+
+  auto res = searcher::do_search(config);
+
+  if (res.isError) {
+    log.log(res.message);
+    if (!config.quiet) {
+      std::cerr << res.message << std::endl;
+    }
+    cleanup(sharedObjects, config);
+    return 1;
+  }
+
+  // call the search function with the config file.
+
+  cleanup(sharedObjects, config);
   return 0;
 }

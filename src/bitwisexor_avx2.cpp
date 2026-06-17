@@ -2,6 +2,10 @@
 #include <cstdint>
 #include <immintrin.h>
 
+// this can be optimised to not use the mask as it has twice comeback to bite
+// us, and have had to code around it, i will leave this as is for now but is
+// on the cards to redo in the future
+
 bool BitwiseXorAvx2Plugin::bitwise_xor_match(const uint32_t *sheet_data,
                                              int sheet_width,
                                              const uint32_t *target_data,
@@ -68,6 +72,4 @@ bool BitwiseXorAvx2Plugin::is_supported() {
   return __builtin_cpu_supports("avx2");
 }
 
-extern "C" ISearchPlugin *create_plugin() {
-  return new BitwiseXorAvx2Plugin();
-}
+extern "C" ISearchPlugin *create_plugin() { return new BitwiseXorAvx2Plugin(); }
