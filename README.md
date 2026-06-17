@@ -4,6 +4,17 @@ AtlasScout is a high-performance, plugin-based utility designed to locate sprite
 
 ---
 
+## Help testing the avx512
+
+We dont have access to a cpu capable of avx512, so we would need help to test the avx512 plugin. To test you can download the release from github and run it on your system. 
+Sorry we cant supply testfiles as they are copyright and we dont have permission to distribute them.
+If you want to help please download a release from the releases tab and run it on your system. If it works please let us know.
+Feel free to submit a pull request with any suggestions or improvements.
+Also we dont have an Intel processor available for use, so we cant test how well if at all it works on an Intel based processor.
+This is a rebuild of a project that was smashed togeather to recover a lost atlas file, for a set of spritesheets and sprites.
+
+---
+
 ## Key Features
 
 - **Hardware Accelerated Matching**: SIMD optimized matching backends including AVX-512 and AVX2 with dynamic runtime CPU capability detection.
@@ -108,21 +119,6 @@ Instead of passing CLI parameters, you can run AtlasScout with a JSON configurat
   "quiet": false
 }
 ```
-
----
-
-## Testing & Verification
-
-We supply a comparison script to verify match output accuracy against the master document:
-
-1. Run a search matching execution:
-   ```bash
-   ./atlasscout -c testfiles/config.json
-   ```
-2. Verify results using the comparison report tool:
-   ```bash
-   python3 testfiles/compare_matches.py
-   ```
 
 ---
 
