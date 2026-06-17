@@ -42,7 +42,7 @@ struct SpriteMatch {
     int width;
     int height;
 
-    int is_rotated;             // 1 if rotated 90 degrees, 0 otherwise
+    int rotation;               // Rotation angle in degrees (e.g. 0, 90, 270)
 };
 ```
 
@@ -63,7 +63,7 @@ When `-f json` is used (or no format is specified), the application outputs a st
         "width": 64,
         "height": 128
       },
-      "rotated": false
+      "rotation": 0
     }
   ],
   "metadata": {
@@ -79,6 +79,6 @@ When `-f tsv` is specified, the application will output tab-separated values. Th
 
 ```tsv
 # Output format:
-# SPRITE_NAME	SPRITE_PATH	ATLAS_NAME	X	Y	W	H	ROTATED
+# SPRITE_NAME	SPRITE_PATH	ATLAS_NAME	X	Y	W	H	ROTATION
 player_run_01	./source_assets/characters/player_run_01.png	main_texture_atlas_v2	1024	256	64	128	0
 ```

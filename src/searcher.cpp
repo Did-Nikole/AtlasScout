@@ -1,3 +1,20 @@
+/*
+ * Copyright (C) 2026 Nikole Smith (ApptsolutioNZ - appsolutionz.com)
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ */
+
 #include "searcher.h"
 #include <map>
 #define STB_IMAGE_IMPLEMENTATION
@@ -237,6 +254,12 @@ Result findSprites(std::string filepattern, bool recurse,
   return findFiles(filepattern, recurse, sprites);
 }
 
+static int getOutputRotation(int CW_deg) {
+  if (CW_deg == 270) return 90;
+  if (CW_deg == 90) return 270;
+  return CW_deg;
+}
+
 Result formatOutput(OutputFormat outType, std::ostream &outPtr,
                     std::vector<AtlasMap> atlasMap, std::string pluginName) {
   if (outType == OutputFormat::JSON) {
@@ -255,7 +278,7 @@ Result formatOutput(OutputFormat outType, std::ostream &outPtr,
       bounds["height"] = m.h - 2;
       match["bounds"] = bounds;
       
-      match["rotated"] = (m.rot != 0);
+      match["rotation"] = getOutputRotation(m.rot);
       matches.push_back(match);
     }
     root["matches"] = matches;
@@ -269,7 +292,7 @@ Result formatOutput(OutputFormat outType, std::ostream &outPtr,
   }
   else if (outType == OutputFormat::TSV) {
     outPtr << "# Output format:\n";
-    outPtr << "# SPRITE_NAME\tSPRITE_PATH\tATLAS_NAME\tX\tY\tW\tH\tROTATED\n";
+    outPtr << "# SPRITE_NAME\tSPRITE_PATH\tATLAS_NAME\tX\tY\tW\tH\tROTATION\n";
     for (const auto &m : atlasMap) {
       std::string sprite_name = std::filesystem::path(m.spriteName).stem().string();
       std::string atlas_name = std::filesystem::path(m.atlasName).stem().string();
@@ -280,11 +303,11 @@ Result formatOutput(OutputFormat outType, std::ostream &outPtr,
              << (m.y + 1) << "\t"
              << (m.w - 2) << "\t"
              << (m.h - 2) << "\t"
-             << (m.rot != 0 ? 1 : 0) << "\n";
+             << getOutputRotation(m.rot) << "\n";
     }
   }
   else if (outType == OutputFormat::CSV) {
-    outPtr << "SPRITE_NAME,SPRITE_PATH,ATLAS_NAME,X,Y,W,H,ROTATED\n";
+    outPtr << "SPRITE_NAME,SPRITE_PATH,ATLAS_NAME,X,Y,W,H,ROTATION\n";
     for (const auto &m : atlasMap) {
       std::string sprite_name = std::filesystem::path(m.spriteName).stem().string();
       std::string atlas_name = std::filesystem::path(m.atlasName).stem().string();
@@ -295,7 +318,7 @@ Result formatOutput(OutputFormat outType, std::ostream &outPtr,
              << (m.y + 1) << ","
              << (m.w - 2) << ","
              << (m.h - 2) << ","
-             << (m.rot != 0 ? 1 : 0) << "\n";
+             << getOutputRotation(m.rot) << "\n";
     }
   }
   else if (outType == OutputFormat::XML) {
@@ -312,7 +335,7 @@ Result formatOutput(OutputFormat outType, std::ostream &outPtr,
       outPtr << "    <y>" << (m.y + 1) << "</y>\n";
       outPtr << "    <width>" << (m.w - 2) << "</width>\n";
       outPtr << "    <height>" << (m.h - 2) << "</height>\n";
-      outPtr << "    <rotated>" << (m.rot != 0 ? 1 : 0) << "</rotated>\n";
+      outPtr << "    <rotation>" << getOutputRotation(m.rot) << "</rotation>\n";
       outPtr << "  </match>\n";
     }
     outPtr << "</matches>\n";
@@ -409,6 +432,14 @@ Image loadImage(std::string filepath, bool crop) {
   return img;
 }
 
+struct SpriteTask {
+  std::string path;
+  std::string name;
+  int base_width;
+  int base_height;
+  std::vector<Image> rotations;
+};
+
 Result do_search(Config config) {
   Logger &logger = Logger::getInstance();
   
@@ -440,7 +471,7 @@ Result do_search(Config config) {
   }
   logger.log("Found " + std::to_string(atlas.size()) + " atlases and " + std::to_string(sprites.size()) + " sprites.");
 
-  std::vector<Image> imgSprites;
+  std::vector<SpriteTask> sprite_tasks;
   std::vector<Image> imgAtlases;
 
   if (!config.quiet) {
@@ -455,10 +486,17 @@ Result do_search(Config config) {
       continue;
     }
 
+    SpriteTask task;
+    task.path = sprite;
+    task.name = std::filesystem::path(sprite).filename().string();
+    task.base_width = base_sprite.w;
+    task.base_height = base_sprite.h;
+
     for (int deg : config.rotations) {
-      imgSprites.push_back(rotateImage(base_sprite, deg));
+      task.rotations.push_back(rotateImage(base_sprite, deg));
     }
     delete[] base_sprite.data;
+    sprite_tasks.push_back(std::move(task));
   }
 
   for (const auto &atl : atlas) {
@@ -470,14 +508,26 @@ Result do_search(Config config) {
     }
   }
 
+  // Sort sprite tasks descending by base sprite area
+  std::sort(sprite_tasks.begin(), sprite_tasks.end(), [](const SpriteTask &a, const SpriteTask &b) {
+    int area_a = a.base_width * a.base_height;
+    int area_b = b.base_width * b.base_height;
+    if (area_a != area_b) {
+      return area_a > area_b;
+    }
+    return a.name < b.name;
+  });
+
   if (!config.quiet) {
-    std::cout << "Loaded " << imgSprites.size() << " sprite configurations and " 
+    std::cout << "Loaded " << sprite_tasks.size() << " sprite(s) and " 
               << imgAtlases.size() << " atlas image(s)." << std::endl;
   }
-  logger.log("Loaded " + std::to_string(imgSprites.size()) + " sprites (with rotations) and " + std::to_string(imgAtlases.size()) + " atlases.");
+  logger.log("Loaded " + std::to_string(sprite_tasks.size()) + " sprites (with rotations) and " + std::to_string(imgAtlases.size()) + " atlases.");
 
   if (!config.searchMethod) {
-    for (auto &img : imgSprites) delete[] img.data;
+    for (auto &task : sprite_tasks) {
+      for (auto &img : task.rotations) delete[] img.data;
+    }
     for (auto &img : imgAtlases) delete[] img.data;
     logger.log("Error: No search plugin selected.");
     return Result{true, "Error: No search plugin selected."};
@@ -496,101 +546,81 @@ Result do_search(Config config) {
     std::mutex bounds_mutex;
     std::mutex log_mutex;
 
-    std::set<std::string> matched_sprite_paths;
-    size_t total_tasks = imgSprites.size();
+    size_t total_tasks = sprite_tasks.size();
     std::atomic<size_t> completed_tasks{0};
 
-    for (const auto &imgSprite : imgSprites) {
-      futures.push_back(pool.enqueue([&imgSprite, &imgAtlases, &atlasmap, &bounds_map, &results_mutex, &bounds_mutex, &log_mutex, &matched_sprite_paths, &completed_tasks, total_tasks, &config, &logger]() {
-        // Early exit if this sprite has already been matched by another rotation/thread
-        {
-          std::lock_guard<std::mutex> lock(results_mutex);
-          if (matched_sprite_paths.contains(imgSprite.path)) {
-            size_t done = ++completed_tasks;
-            std::lock_guard<std::mutex> log_lock(log_mutex);
-            if (done % 50 == 0 || done == total_tasks) {
-              std::string progress_msg = "Progress: " + std::to_string(done) + "/" + std::to_string(total_tasks) + " sprite configurations processed.";
-              logger.log(progress_msg);
-              if (!config.quiet) {
-                std::cout << progress_msg << "\r" << std::flush;
-              }
-            }
-            return;
-          }
-        }
-
+    for (const auto &task : sprite_tasks) {
+      futures.push_back(pool.enqueue([&task, &imgAtlases, &atlasmap, &bounds_map, &results_mutex, &bounds_mutex, &log_mutex, &completed_tasks, total_tasks, &config, &logger]() {
         bool matched = false;
-        for (const auto &imgAtlas : imgAtlases) {
+
+        for (const auto &imgSprite : task.rotations) {
           if (matched) break;
 
-          int max_y = imgAtlas.h - imgSprite.h + 1;
-          int max_x = imgAtlas.w - imgSprite.w + 1;
-
-          for (int y = 0; y < max_y; y++) {
+          for (const auto &imgAtlas : imgAtlases) {
             if (matched) break;
 
-            // Periodically check if another thread/rotation already matched this sprite
-            {
-              std::lock_guard<std::mutex> lock(results_mutex);
-              if (matched_sprite_paths.contains(imgSprite.path)) {
-                matched = true;
-                break;
+            int max_y = imgAtlas.h - imgSprite.h + 1;
+            int max_x = imgAtlas.w - imgSprite.w + 1;
+
+            for (int y = 0; y < max_y; y++) {
+              if (matched) break;
+
+              std::vector<Bounds> local_bounds;
+              {
+                std::lock_guard<std::mutex> lock(bounds_mutex);
+                if (bounds_map.contains(imgAtlas.path)) {
+                  local_bounds = bounds_map[imgAtlas.path];
+                }
               }
-            }
 
-            std::vector<Bounds> local_bounds;
-            {
-              std::lock_guard<std::mutex> lock(bounds_mutex);
-              if (bounds_map.contains(imgAtlas.path)) {
-                local_bounds = bounds_map[imgAtlas.path];
-              }
-            }
+              for (int x = 0; x < max_x; x++) {
+                bool inside = false;
+                for (const auto &b : local_bounds) {
+                  if (x >= b.x1 && x <= b.x2 && y >= b.y1 && y <= b.y2) {
+                    inside = true;
+                    break;
+                  }
+                }
+                if (inside) continue;
 
-            for (int x = 0; x < max_x; x++) {
+                if (config.searchMethod->bitwise_xor_match(
+                        imgAtlas.data, imgAtlas.w, imgSprite.data, imgSprite.w,
+                        imgSprite.h, x, y)) {
+                  
+                  {
+                    std::lock_guard<std::mutex> lock(results_mutex);
+                    atlasmap.push_back({imgSprite.path, imgAtlas.path, x, y,
+                                        imgSprite.w, imgSprite.h, imgSprite.rot});
+                  }
 
-              bool inside = false;
-              for (const auto &b : local_bounds) {
-                if (x >= b.x1 && x <= b.x2 && y >= b.y1 && y <= b.y2) {
-                  inside = true;
+                  {
+                    std::lock_guard<std::mutex> lock(bounds_mutex);
+                    bounds_map[imgAtlas.path].push_back({x, y, x + imgSprite.w - 1, y + imgSprite.h - 1});
+                  }
+
+                  {
+                    std::lock_guard<std::mutex> lock(log_mutex);
+                    std::string match_msg = "Match found: " + imgSprite.path + " in " + imgAtlas.path + " at (" + std::to_string(x) + "," + std::to_string(y) + ")";
+                    logger.log(match_msg);
+                    if (!config.quiet) {
+                      std::cout << "\n" << match_msg << std::endl;
+                    }
+                  }
+
+                  matched = true;
                   break;
                 }
               }
-              if (inside) continue;
-
-              if (config.searchMethod->bitwise_xor_match(
-                      imgAtlas.data, imgAtlas.w, imgSprite.data, imgSprite.w,
-                      imgSprite.h, x, y)) {
-                
-                {
-                  std::lock_guard<std::mutex> lock(results_mutex);
-                  // Double check match condition under lock
-                  if (matched_sprite_paths.contains(imgSprite.path)) {
-                    matched = true;
-                    break;
-                  }
-                  matched_sprite_paths.insert(imgSprite.path);
-                  atlasmap.push_back({imgSprite.path, imgAtlas.path, x, y,
-                                      imgSprite.w, imgSprite.h, imgSprite.rot});
-                }
-
-                {
-                  std::lock_guard<std::mutex> lock(bounds_mutex);
-                  bounds_map[imgAtlas.path].push_back({x, y, x + imgSprite.w - 1, y + imgSprite.h - 1});
-                }
-
-                {
-                  std::lock_guard<std::mutex> lock(log_mutex);
-                  std::string match_msg = "Match found: " + imgSprite.path + " in " + imgAtlas.path + " at (" + std::to_string(x) + "," + std::to_string(y) + ")";
-                  logger.log(match_msg);
-                  if (!config.quiet) {
-                    std::cout << "\n" << match_msg << std::endl;
-                  }
-                }
-
-                matched = true;
-                break;
-              }
             }
+          }
+        }
+
+        if (!matched) {
+          std::lock_guard<std::mutex> lock(log_mutex);
+          std::string no_match_msg = "No match found for sprite: " + task.path;
+          logger.log(no_match_msg);
+          if (!config.quiet) {
+            std::cout << "\n" << no_match_msg << std::endl;
           }
         }
 
@@ -598,7 +628,7 @@ Result do_search(Config config) {
         {
           std::lock_guard<std::mutex> lock(log_mutex);
           if (done % 50 == 0 || done == total_tasks) {
-            std::string progress_msg = "Progress: " + std::to_string(done) + "/" + std::to_string(total_tasks) + " sprite configurations processed.";
+            std::string progress_msg = "Progress: " + std::to_string(done) + "/" + std::to_string(total_tasks) + " sprites processed.";
             logger.log(progress_msg);
             if (!config.quiet) {
               std::cout << progress_msg << "\r" << std::flush;
@@ -618,8 +648,10 @@ Result do_search(Config config) {
   }
   logger.log("Search finished. Total matches: " + std::to_string(atlasmap.size()));
 
-  for (auto &img : imgSprites) {
-    delete[] img.data;
+  for (auto &task : sprite_tasks) {
+    for (auto &img : task.rotations) {
+      delete[] img.data;
+    }
   }
   for (auto &img : imgAtlases) {
     delete[] img.data;
