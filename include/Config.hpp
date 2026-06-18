@@ -57,6 +57,7 @@ struct Config {
   std::string atlaspath;
   bool recurse = false;
   std::ostream *output_ptr = &std::cout;
+  std::string output_file;
   OutputFormat outputformat = OutputFormat::JSON;
   ISearchPlugin *searchMethod = nullptr;
   bool quiet = false;

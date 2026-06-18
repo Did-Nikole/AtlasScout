@@ -17,10 +17,9 @@
 
 #define ARGSPARSERRENEWED_IMPLEMENTATION
 #include "ArgsParser.hpp"
-#include "ISearchPlugin.hpp"
-#include "Logger.hpp"
-#include "json.hpp"
 #include "Config.hpp"
+#include "ISearchPlugin.hpp"
+#include "json.hpp"
 #include "searcher.h"
 #include <dlfcn.h>
 #include <filesystem>
@@ -49,7 +48,8 @@ bool loadConfig(std::string filename, Config &config,
     return false;
   }
 
-  std::filesystem::path config_dir = std::filesystem::path(filename).parent_path();
+  std::filesystem::path config_dir =
+      std::filesystem::path(filename).parent_path();
 
   // Parse atlas_source
   if (j.contains("atlas_source") && j["atlas_source"].is_string()) {
@@ -115,6 +115,7 @@ bool loadConfig(std::string filename, Config &config,
         return false;
       }
       config.output_ptr = outfile;
+      config.output_file = outstring;
     }
   }
 
@@ -158,6 +159,44 @@ bool loadConfig(std::string filename, Config &config,
   return true;
 }
 
+// the following should be used while loading images, and processing,
+//  then if output = stdout then wrap the std::out with "[CLIP START]"
+//  formatOutput "[CLIP END]" else just output a message, "Writing " "output
+//  name" "." output format, followed by a newline
+
+// this should be passed as a callback to the searcher.cpp, and called when item
+// is found or not found.
+void consoleMsg(Config config, const char *msg) {
+  if (config.quiet)
+    return;
+  // erase current line on screen (use esc chars), write message out, then do
+  // linefeed
+  std::cout << "\r\033[2K" << msg << std::endl;
+}
+
+// this should be passed as a callback to the searcher.cpp, and call it
+// periodically to update the progressbar?
+void updateProg(Config config, float percent, int assetCount) {
+  if (config.quiet)
+    return;
+
+  // erase current line on screen (use esc chars), draw percentage bar,
+  // percentage amount.
+  int pc = static_cast<int>(percent * 40.0f);
+  if (pc < 0) pc = 0;
+  if (pc > 40) pc = 40;
+  int ac = 40 - pc;
+
+  std::string bar = "[";
+  bar.append(static_cast<size_t>(pc), '-');
+  bar.append("|");
+  bar.append(static_cast<size_t>(ac), '-');
+  bar.append("] ");
+
+  int percentage = static_cast<int>(percent * 100.0f);
+  std::cout << "\r\033[2K" << bar << percentage << "% of " << assetCount << " Assets processed." << std::flush;
+}
+
 void cleanup(std::map<std::string, dlObjects> &sharedObjects, Config config) {
   if (config.output_ptr != &std::cout) {
     delete config.output_ptr;
@@ -170,11 +209,6 @@ void cleanup(std::map<std::string, dlObjects> &sharedObjects, Config config) {
 }
 
 int main(int argc, char **argv) {
-
-  Logger &log = Logger::getInstance();
-  log.init("debug.log", true);
-
-  log.log("Starting atlasscout");
 
   std::map<std::string, std::optional<ArgValue>> results;
   ArgsParser parser;
@@ -365,7 +399,7 @@ int main(int argc, char **argv) {
       config.recurse = std::get<bool>(results["recurse"].value());
     else
       config.recurse = false;
-    if (results["format"].has_value()) {
+    if (results["format"].has_value() && !std::get<std::string>(results["format"].value()).empty()) {
       auto format = std::get<std::string>(results["format"].value());
       if (format == "json")
         config.outputformat = OutputFormat::JSON;
@@ -382,7 +416,7 @@ int main(int argc, char **argv) {
       }
       if (results.contains("output")) {
         auto outstring = std::get<std::string>(results.at("output").value());
-        if (outstring != "stdout") {
+        if (!outstring.empty() && outstring != "stdout" && outstring != "-") {
 
           auto *outfile =
               new std::ofstream(outstring + "." + config.outputformat.suffix());
@@ -394,6 +428,7 @@ int main(int argc, char **argv) {
             return 1;
           }
           config.output_ptr = outfile;
+          config.output_file = outstring;
         }
       }
 
@@ -401,7 +436,7 @@ int main(int argc, char **argv) {
       config.outputformat = OutputFormat::JSON;
     }
 
-    if (results["type"].has_value()) {
+    if (results["type"].has_value() && !std::get<std::string>(results["type"].value()).empty()) {
       auto type = std::get<std::string>(results["type"].value());
       if (sharedObjects.contains(type)) {
         config.searchMethod = sharedObjects[type].plugin;
@@ -444,15 +479,13 @@ int main(int argc, char **argv) {
   }
 
   // dump the config at this point just for sanity, might turn it off later
-  log.log("Config :" + config.to_string());
   if (!config.quiet) {
     std::cout << "Config :" + config.to_string() << std::endl;
   }
 
-  auto res = searcher::do_search(config);
+  auto res = searcher::do_search(config, consoleMsg, updateProg);
 
   if (res.isError) {
-    log.log(res.message);
     if (!config.quiet) {
       std::cerr << res.message << std::endl;
     }

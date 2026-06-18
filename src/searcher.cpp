@@ -38,7 +38,6 @@
 #include <fstream>
 #include <set>
 #include "json.hpp"
-#include "Logger.hpp"
 
 namespace searcher {
 
@@ -440,9 +439,9 @@ struct SpriteTask {
   std::vector<Image> rotations;
 };
 
-Result do_search(Config config) {
-  Logger &logger = Logger::getInstance();
-  
+Result do_search(Config config,
+                 std::function<void(Config, const char*)> msgCallback,
+                 std::function<void(Config, float, int)> progressCallback) {
   std::vector<AtlasMap> atlasmap;
   std::vector<std::string> atlas;
   std::vector<std::string> sprites;
@@ -451,17 +450,14 @@ Result do_search(Config config) {
   if (!config.quiet) {
     std::cout << "Scanning for atlas and sprite files..." << std::endl;
   }
-  logger.log("Scanning directories...");
 
   Result atlas_res = findAtlas(config.atlaspath, config.recurse, atlas);
   if (atlas_res.isError) {
-    logger.log("Error finding atlas: " + atlas_res.message);
     return atlas_res;
   }
 
   Result sprite_res = findSprites(config.spritespath, config.recurse, sprites);
   if (sprite_res.isError) {
-    logger.log("Error finding sprites: " + sprite_res.message);
     return sprite_res;
   }
 
@@ -469,44 +465,71 @@ Result do_search(Config config) {
     std::cout << "Found " << atlas.size() << " atlas candidate(s) and " 
               << sprites.size() << " sprite candidate(s)." << std::endl;
   }
-  logger.log("Found " + std::to_string(atlas.size()) + " atlases and " + std::to_string(sprites.size()) + " sprites.");
 
-  std::vector<SpriteTask> sprite_tasks;
-  std::vector<Image> imgAtlases;
+  std::vector<int> physical_cpus = get_physical_core_cpus();
+  ThreadPool pool(physical_cpus.size(), physical_cpus);
+
+  std::vector<SpriteTask> sprite_tasks(sprites.size());
+  std::vector<Image> imgAtlases(atlas.size());
 
   if (!config.quiet) {
     std::cout << "Loading images..." << std::endl;
   }
-  logger.log("Loading images...");
 
-  for (const auto &sprite : sprites) {
-    Image base_sprite = loadImage(sprite, true);
-    if (base_sprite.data == nullptr) {
-      logger.log("Failed to load sprite: " + sprite);
-      continue;
-    }
+  std::vector<std::future<void>> load_futures;
 
-    SpriteTask task;
-    task.path = sprite;
-    task.name = std::filesystem::path(sprite).filename().string();
-    task.base_width = base_sprite.w;
-    task.base_height = base_sprite.h;
+  // Parallelize sprite loading
+  for (size_t i = 0; i < sprites.size(); ++i) {
+    load_futures.push_back(pool.enqueue([i, &sprites, &sprite_tasks, &config]() {
+      const auto &sprite = sprites[i];
+      Image base_sprite = loadImage(sprite, true);
+      if (base_sprite.data == nullptr) {
+        return;
+      }
 
-    for (int deg : config.rotations) {
-      task.rotations.push_back(rotateImage(base_sprite, deg));
-    }
-    delete[] base_sprite.data;
-    sprite_tasks.push_back(std::move(task));
+      SpriteTask task;
+      task.path = sprite;
+      task.name = std::filesystem::path(sprite).filename().string();
+      task.base_width = base_sprite.w;
+      task.base_height = base_sprite.h;
+
+      for (int deg : config.rotations) {
+        task.rotations.push_back(rotateImage(base_sprite, deg));
+      }
+      delete[] base_sprite.data;
+      sprite_tasks[i] = std::move(task);
+    }));
   }
 
-  for (const auto &atl : atlas) {
-    Image atlas_img = loadImage(atl, false);
-    if (atlas_img.data != nullptr) {
-      imgAtlases.push_back(atlas_img);
-    } else {
-      logger.log("Failed to load atlas: " + atl);
+  // Parallelize atlas loading
+  for (size_t i = 0; i < atlas.size(); ++i) {
+    load_futures.push_back(pool.enqueue([i, &atlas, &imgAtlases]() {
+      imgAtlases[i] = loadImage(atlas[i], false);
+    }));
+  }
+
+  // Wait for all loading tasks to finish
+  for (auto &f : load_futures) {
+    f.get();
+  }
+
+  // Filter out any failed sprite tasks
+  std::vector<SpriteTask> valid_sprite_tasks;
+  for (auto &task : sprite_tasks) {
+    if (!task.rotations.empty()) {
+      valid_sprite_tasks.push_back(std::move(task));
     }
   }
+  sprite_tasks = std::move(valid_sprite_tasks);
+
+  // Filter out any failed atlas images
+  std::vector<Image> valid_imgAtlases;
+  for (auto &img : imgAtlases) {
+    if (img.data != nullptr) {
+      valid_imgAtlases.push_back(img);
+    }
+  }
+  imgAtlases = std::move(valid_imgAtlases);
 
   // Sort sprite tasks descending by base sprite area
   std::sort(sprite_tasks.begin(), sprite_tasks.end(), [](const SpriteTask &a, const SpriteTask &b) {
@@ -522,25 +545,20 @@ Result do_search(Config config) {
     std::cout << "Loaded " << sprite_tasks.size() << " sprite(s) and " 
               << imgAtlases.size() << " atlas image(s)." << std::endl;
   }
-  logger.log("Loaded " + std::to_string(sprite_tasks.size()) + " sprites (with rotations) and " + std::to_string(imgAtlases.size()) + " atlases.");
 
   if (!config.searchMethod) {
     for (auto &task : sprite_tasks) {
       for (auto &img : task.rotations) delete[] img.data;
     }
     for (auto &img : imgAtlases) delete[] img.data;
-    logger.log("Error: No search plugin selected.");
     return Result{true, "Error: No search plugin selected."};
   }
 
   if (!config.quiet) {
     std::cout << "Starting image search using plugin: " << config.searchMethod->get_name() << std::endl;
   }
-  logger.log("Starting match search...");
 
   {
-    std::vector<int> physical_cpus = get_physical_core_cpus();
-    ThreadPool pool(physical_cpus.size(), physical_cpus);
     std::vector<std::future<void>> futures;
     std::mutex results_mutex;
     std::mutex bounds_mutex;
@@ -550,7 +568,7 @@ Result do_search(Config config) {
     std::atomic<size_t> completed_tasks{0};
 
     for (const auto &task : sprite_tasks) {
-      futures.push_back(pool.enqueue([&task, &imgAtlases, &atlasmap, &bounds_map, &results_mutex, &bounds_mutex, &log_mutex, &completed_tasks, total_tasks, &config, &logger]() {
+      futures.push_back(pool.enqueue([&task, &imgAtlases, &atlasmap, &bounds_map, &results_mutex, &bounds_mutex, &log_mutex, &completed_tasks, total_tasks, &config, &msgCallback, &progressCallback]() {
         bool matched = false;
 
         for (const auto &imgSprite : task.rotations) {
@@ -601,8 +619,9 @@ Result do_search(Config config) {
                   {
                     std::lock_guard<std::mutex> lock(log_mutex);
                     std::string match_msg = "Match found: " + imgSprite.path + " in " + imgAtlas.path + " at (" + std::to_string(x) + "," + std::to_string(y) + ")";
-                    logger.log(match_msg);
-                    if (!config.quiet) {
+                    if (msgCallback) {
+                      msgCallback(config, match_msg.c_str());
+                    } else if (!config.quiet) {
                       std::cout << "\n" << match_msg << std::endl;
                     }
                   }
@@ -618,8 +637,9 @@ Result do_search(Config config) {
         if (!matched) {
           std::lock_guard<std::mutex> lock(log_mutex);
           std::string no_match_msg = "No match found for sprite: " + task.path;
-          logger.log(no_match_msg);
-          if (!config.quiet) {
+          if (msgCallback) {
+            msgCallback(config, no_match_msg.c_str());
+          } else if (!config.quiet) {
             std::cout << "\n" << no_match_msg << std::endl;
           }
         }
@@ -627,11 +647,15 @@ Result do_search(Config config) {
         size_t done = ++completed_tasks;
         {
           std::lock_guard<std::mutex> lock(log_mutex);
-          if (done % 50 == 0 || done == total_tasks) {
-            std::string progress_msg = "Progress: " + std::to_string(done) + "/" + std::to_string(total_tasks) + " sprites processed.";
-            logger.log(progress_msg);
-            if (!config.quiet) {
-              std::cout << progress_msg << "\r" << std::flush;
+          if (progressCallback) {
+            float percent = static_cast<float>(done) / static_cast<float>(total_tasks);
+            progressCallback(config, percent, static_cast<int>(total_tasks));
+          } else {
+            if (done % 50 == 0 || done == total_tasks) {
+              std::string progress_msg = "Progress: " + std::to_string(done) + "/" + std::to_string(total_tasks) + " sprites processed.";
+              if (!config.quiet) {
+                std::cout << progress_msg << "\r" << std::flush;
+              }
             }
           }
         }
@@ -646,7 +670,6 @@ Result do_search(Config config) {
   if (!config.quiet) {
     std::cout << "\nSearch completed. Found " << atlasmap.size() << " match(es) total." << std::endl;
   }
-  logger.log("Search finished. Total matches: " + std::to_string(atlasmap.size()));
 
   for (auto &task : sprite_tasks) {
     for (auto &img : task.rotations) {
@@ -658,6 +681,18 @@ Result do_search(Config config) {
   }
 
   std::string pluginName = config.searchMethod->get_name();
-  return formatOutput(config.outputformat, *config.output_ptr, atlasmap, pluginName);
+  bool isStdout = (config.output_ptr == &std::cout);
+  if (isStdout) {
+    *config.output_ptr << "[CLIP START]\n";
+  }
+  Result write_res = formatOutput(config.outputformat, *config.output_ptr, atlasmap, pluginName);
+  if (isStdout) {
+    *config.output_ptr << "[CLIP END]\n";
+  } else {
+    if (!config.quiet) {
+      std::cout << "Writing " << config.output_file << "." << config.outputformat.suffix() << "\n";
+    }
+  }
+  return write_res;
 }
 } // namespace searcher

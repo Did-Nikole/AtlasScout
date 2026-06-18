@@ -20,6 +20,7 @@
 #include <iostream>
 #include <string>
 #include <vector>
+#include <functional>
 
 namespace searcher {
 struct Result {
@@ -56,5 +57,7 @@ Result formatOutput(OutputFormat outType, std::ostream &outPtr,
 
 Image loadImage(std::string filepath, bool crop = false);
 
-Result do_search(Config config);
+Result do_search(Config config,
+                 std::function<void(Config, const char*)> msgCallback = nullptr,
+                 std::function<void(Config, float, int)> progressCallback = nullptr);
 } // namespace searcher
