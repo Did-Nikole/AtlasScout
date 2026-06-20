@@ -17,10 +17,13 @@
 
 #pragma once
 #include "Config.hpp"
+#include <atomic>
+#include <bits/c++config.h>
+#include <functional>
 #include <iostream>
+#include <memory>
 #include <string>
 #include <vector>
-#include <functional>
 
 namespace searcher {
 struct Result {
@@ -36,6 +39,13 @@ struct Image {
   uint32_t *data;
 };
 
+struct SpriteTask {
+  std::string path;
+  std::string name;
+  int base_width;
+  int base_height;
+  std::vector<Image> rotations;
+};
 struct AtlasMap {
   std::string spriteName;
   std::string atlasName;
@@ -44,6 +54,48 @@ struct AtlasMap {
   int w;
   int h;
   int rot;
+};
+
+struct DynamicBitmask {
+  int _width = 0;
+  int _height = 0;
+  std::unique_ptr<std::atomic<uint64_t>[]> _grid = nullptr;
+
+  DynamicBitmask() = default;
+  DynamicBitmask(int w, int h) : _width(w), _height(h) {
+    size_t total_pixels = static_cast<size_t>(w * h);
+    size_t total_words = (total_pixels + 63) / 64;
+    _grid = std::make_unique<std::atomic<uint64_t>[]>(total_words);
+    for (size_t i = 0; i < total_words; ++i)
+      _grid[i].store(0, std::memory_order_relaxed);
+  }
+
+  inline bool is_skipped(int x, int y) const {
+    if (!_grid) return false;
+    size_t pixel_idx = static_cast<size_t>((y * _width) + x);
+    size_t word_idx = pixel_idx / 64;
+    int bit_idx = pixel_idx % 64;
+    uint64_t word = _grid[word_idx].load(std::memory_order_relaxed);
+    return (word & (1ULL << bit_idx)) != 0;
+  }
+
+  void mark_matched_bounds(int sx, int sy, int w, int h) {
+    if (!_grid) return;
+    for (int y = sy; y < sy + h; ++y) {
+      for (int x = sx; x < sx + w; ++x) {
+        size_t pixel_idx = static_cast<size_t>((y * _width) + x);
+        size_t word_idx = pixel_idx / 64;
+        int bit_idx = pixel_idx % 64;
+
+        _grid[word_idx].fetch_or(1ULL << bit_idx, std::memory_order_relaxed);
+      }
+    }
+  }
+};
+
+struct ImageWMask {
+  Image image;
+  DynamicBitmask mask;
 };
 
 Result findAtlas(std::string filepattern, bool recurse,
@@ -57,7 +109,8 @@ Result formatOutput(OutputFormat outType, std::ostream &outPtr,
 
 Image loadImage(std::string filepath, bool crop = false);
 
-Result do_search(Config config,
-                 std::function<void(Config, const char*)> msgCallback = nullptr,
-                 std::function<void(Config, float, int)> progressCallback = nullptr);
+Result
+do_search(Config config,
+          std::function<void(Config, const char *)> msgCallback = nullptr,
+          std::function<void(Config, float, int)> progressCallback = nullptr);
 } // namespace searcher

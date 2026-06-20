@@ -18,26 +18,26 @@
 #include "searcher.h"
 #include <map>
 #define STB_IMAGE_IMPLEMENTATION
+#include "json.hpp"
 #include "stb_image.h"
 #include <algorithm>
+#include <atomic>
+#include <condition_variable>
 #include <cstddef>
 #include <cstring>
 #include <filesystem>
-#include <iostream>
 #include <fnmatch.h>
-#include <thread>
-#include <queue>
-#include <mutex>
-#include <condition_variable>
-#include <future>
-#include <functional>
-#include <atomic>
-#include <unistd.h>
-#include <pthread.h>
-#include <sched.h>
 #include <fstream>
+#include <functional>
+#include <future>
+#include <iostream>
+#include <mutex>
+#include <pthread.h>
+#include <queue>
+#include <sched.h>
 #include <set>
-#include "json.hpp"
+#include <thread>
+#include <unistd.h>
 
 namespace searcher {
 
@@ -48,7 +48,8 @@ struct Bounds {
 namespace {
 class ThreadPool {
 public:
-  ThreadPool(size_t threads, const std::vector<int>& physical_cpus) : stop(false) {
+  ThreadPool(size_t threads, const std::vector<int> &physical_cpus)
+      : stop(false) {
     for (size_t i = 0; i < threads; ++i) {
       workers.emplace_back([this, i, physical_cpus]() {
         if (i < physical_cpus.size()) {
@@ -64,7 +65,8 @@ public:
           std::function<void()> task;
           {
             std::unique_lock<std::mutex> lock(this->queue_mutex);
-            this->condition.wait(lock, [this]() { return this->stop || !this->tasks.empty(); });
+            this->condition.wait(
+                lock, [this]() { return this->stop || !this->tasks.empty(); });
             if (this->stop && this->tasks.empty())
               return;
             task = std::move(this->tasks.front());
@@ -76,15 +78,14 @@ public:
     }
   }
 
-  template<class F, class... Args>
-  auto enqueue(F&& f, Args&&... args) 
-    -> std::future<typename std::invoke_result<F, Args...>::type> {
+  template <class F, class... Args>
+  auto enqueue(F &&f, Args &&...args)
+      -> std::future<typename std::invoke_result<F, Args...>::type> {
     using return_type = typename std::invoke_result<F, Args...>::type;
 
     auto task = std::make_shared<std::packaged_task<return_type()>>(
-      std::bind(std::forward<F>(f), std::forward<Args>(args)...)
-    );
-        
+        std::bind(std::forward<F>(f), std::forward<Args>(args)...));
+
     std::future<return_type> res = task->get_future();
     {
       std::unique_lock<std::mutex> lock(queue_mutex);
@@ -102,7 +103,7 @@ public:
       stop = true;
     }
     condition.notify_all();
-    for (std::thread &worker: workers) {
+    for (std::thread &worker : workers) {
       if (worker.joinable()) {
         worker.join();
       }
@@ -149,7 +150,8 @@ static std::vector<int> get_physical_core_cpus() {
   return core_cpus;
 }
 
-Result findFiles(std::string filepattern, bool recurse, std::vector<std::string> &files) {
+Result findFiles(std::string filepattern, bool recurse,
+                 std::vector<std::string> &files) {
   size_t last_slash = filepattern.find_last_of("/\\");
   std::string dir_path = ".";
   std::string pattern = filepattern;
@@ -158,13 +160,15 @@ Result findFiles(std::string filepattern, bool recurse, std::vector<std::string>
     pattern = filepattern.substr(last_slash + 1);
   }
 
-  if (!std::filesystem::exists(dir_path) || !std::filesystem::is_directory(dir_path)) {
+  if (!std::filesystem::exists(dir_path) ||
+      !std::filesystem::is_directory(dir_path)) {
     return Result{true, "Directory does not exist: " + dir_path};
   }
 
-  auto scan_dir = [&](const std::filesystem::path& p) {
+  auto scan_dir = [&](const std::filesystem::path &p) {
     if (recurse) {
-      for (const auto& entry : std::filesystem::recursive_directory_iterator(p)) {
+      for (const auto &entry :
+           std::filesystem::recursive_directory_iterator(p)) {
         if (entry.is_regular_file()) {
           std::string filename = entry.path().filename().string();
           if (fnmatch(pattern.c_str(), filename.c_str(), 0) == 0) {
@@ -173,7 +177,7 @@ Result findFiles(std::string filepattern, bool recurse, std::vector<std::string>
         }
       }
     } else {
-      for (const auto& entry : std::filesystem::directory_iterator(p)) {
+      for (const auto &entry : std::filesystem::directory_iterator(p)) {
         if (entry.is_regular_file()) {
           std::string filename = entry.path().filename().string();
           if (fnmatch(pattern.c_str(), filename.c_str(), 0) == 0) {
@@ -186,7 +190,7 @@ Result findFiles(std::string filepattern, bool recurse, std::vector<std::string>
 
   try {
     scan_dir(dir_path);
-  } catch (const std::exception& e) {
+  } catch (const std::exception &e) {
     return Result{true, std::string("Error scanning directory: ") + e.what()};
   }
 
@@ -197,7 +201,8 @@ Image rotateImage(const Image &img, int degrees) {
   if (degrees == 0) {
     Image copy_img = img;
     copy_img.data = new uint32_t[static_cast<size_t>(img.w * img.h)];
-    std::memcpy(copy_img.data, img.data, static_cast<size_t>(img.w * img.h) * sizeof(uint32_t));
+    std::memcpy(copy_img.data, img.data,
+                static_cast<size_t>(img.w * img.h) * sizeof(uint32_t));
     return copy_img;
   }
 
@@ -211,7 +216,8 @@ Image rotateImage(const Image &img, int degrees) {
     rot_img.data = new uint32_t[static_cast<size_t>(rot_img.w * rot_img.h)];
     for (int y = 0; y < img.h; ++y) {
       for (int x = 0; x < img.w; ++x) {
-        rot_img.data[x * rot_img.w + (rot_img.w - 1 - y)] = img.data[y * img.w + x];
+        rot_img.data[x * rot_img.w + (rot_img.w - 1 - y)] =
+            img.data[y * img.w + x];
       }
     }
   } else if (degrees == 180) {
@@ -220,7 +226,8 @@ Image rotateImage(const Image &img, int degrees) {
     rot_img.data = new uint32_t[static_cast<size_t>(rot_img.w * rot_img.h)];
     for (int y = 0; y < img.h; ++y) {
       for (int x = 0; x < img.w; ++x) {
-        rot_img.data[(img.h - 1 - y) * rot_img.w + (img.w - 1 - x)] = img.data[y * img.w + x];
+        rot_img.data[(img.h - 1 - y) * rot_img.w + (img.w - 1 - x)] =
+            img.data[y * img.w + x];
       }
     }
   } else if (degrees == 270) {
@@ -235,7 +242,8 @@ Image rotateImage(const Image &img, int degrees) {
   } else {
     Image copy_img = img;
     copy_img.data = new uint32_t[static_cast<size_t>(img.w * img.h)];
-    std::memcpy(copy_img.data, img.data, static_cast<size_t>(img.w * img.h) * sizeof(uint32_t));
+    std::memcpy(copy_img.data, img.data,
+                static_cast<size_t>(img.w * img.h) * sizeof(uint32_t));
     return copy_img;
   }
 
@@ -254,8 +262,10 @@ Result findSprites(std::string filepattern, bool recurse,
 }
 
 static int getOutputRotation(int CW_deg) {
-  if (CW_deg == 270) return 90;
-  if (CW_deg == 90) return 270;
+  if (CW_deg == 270)
+    return 90;
+  if (CW_deg == 90)
+    return 270;
   return CW_deg;
 }
 
@@ -266,66 +276,61 @@ Result formatOutput(OutputFormat outType, std::ostream &outPtr,
     nlohmann::json matches = nlohmann::json::array();
     for (const auto &m : atlasMap) {
       nlohmann::json match = nlohmann::json::object();
-      match["sprite_name"] = std::filesystem::path(m.spriteName).stem().string();
+      match["sprite_name"] =
+          std::filesystem::path(m.spriteName).stem().string();
       match["sprite_path"] = m.spriteName;
       match["atlas_name"] = std::filesystem::path(m.atlasName).stem().string();
-      
+
       nlohmann::json bounds = nlohmann::json::object();
       bounds["x"] = m.x + 1;
       bounds["y"] = m.y + 1;
       bounds["width"] = m.w - 2;
       bounds["height"] = m.h - 2;
       match["bounds"] = bounds;
-      
+
       match["rotation"] = getOutputRotation(m.rot);
       matches.push_back(match);
     }
     root["matches"] = matches;
-    
+
     nlohmann::json metadata = nlohmann::json::object();
     metadata["total_found"] = atlasMap.size();
     metadata["search_plugin_used"] = pluginName;
     root["metadata"] = metadata;
-    
+
     outPtr << root.dump(2) << std::endl;
-  }
-  else if (outType == OutputFormat::TSV) {
+  } else if (outType == OutputFormat::TSV) {
     outPtr << "# Output format:\n";
     outPtr << "# SPRITE_NAME\tSPRITE_PATH\tATLAS_NAME\tX\tY\tW\tH\tROTATION\n";
     for (const auto &m : atlasMap) {
-      std::string sprite_name = std::filesystem::path(m.spriteName).stem().string();
-      std::string atlas_name = std::filesystem::path(m.atlasName).stem().string();
-      outPtr << sprite_name << "\t"
-             << m.spriteName << "\t"
-             << atlas_name << "\t"
-             << (m.x + 1) << "\t"
-             << (m.y + 1) << "\t"
-             << (m.w - 2) << "\t"
-             << (m.h - 2) << "\t"
-             << getOutputRotation(m.rot) << "\n";
+      std::string sprite_name =
+          std::filesystem::path(m.spriteName).stem().string();
+      std::string atlas_name =
+          std::filesystem::path(m.atlasName).stem().string();
+      outPtr << sprite_name << "\t" << m.spriteName << "\t" << atlas_name
+             << "\t" << (m.x + 1) << "\t" << (m.y + 1) << "\t" << (m.w - 2)
+             << "\t" << (m.h - 2) << "\t" << getOutputRotation(m.rot) << "\n";
     }
-  }
-  else if (outType == OutputFormat::CSV) {
+  } else if (outType == OutputFormat::CSV) {
     outPtr << "SPRITE_NAME,SPRITE_PATH,ATLAS_NAME,X,Y,W,H,ROTATION\n";
     for (const auto &m : atlasMap) {
-      std::string sprite_name = std::filesystem::path(m.spriteName).stem().string();
-      std::string atlas_name = std::filesystem::path(m.atlasName).stem().string();
-      outPtr << "\"" << sprite_name << "\",\""
-             << m.spriteName << "\",\""
-             << atlas_name << "\","
-             << (m.x + 1) << ","
-             << (m.y + 1) << ","
-             << (m.w - 2) << ","
-             << (m.h - 2) << ","
-             << getOutputRotation(m.rot) << "\n";
+      std::string sprite_name =
+          std::filesystem::path(m.spriteName).stem().string();
+      std::string atlas_name =
+          std::filesystem::path(m.atlasName).stem().string();
+      outPtr << "\"" << sprite_name << "\",\"" << m.spriteName << "\",\""
+             << atlas_name << "\"," << (m.x + 1) << "," << (m.y + 1) << ","
+             << (m.w - 2) << "," << (m.h - 2) << "," << getOutputRotation(m.rot)
+             << "\n";
     }
-  }
-  else if (outType == OutputFormat::XML) {
+  } else if (outType == OutputFormat::XML) {
     outPtr << "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n";
     outPtr << "<matches>\n";
     for (const auto &m : atlasMap) {
-      std::string sprite_name = std::filesystem::path(m.spriteName).stem().string();
-      std::string atlas_name = std::filesystem::path(m.atlasName).stem().string();
+      std::string sprite_name =
+          std::filesystem::path(m.spriteName).stem().string();
+      std::string atlas_name =
+          std::filesystem::path(m.atlasName).stem().string();
       outPtr << "  <match>\n";
       outPtr << "    <sprite_name>" << sprite_name << "</sprite_name>\n";
       outPtr << "    <sprite_path>" << m.spriteName << "</sprite_path>\n";
@@ -343,7 +348,8 @@ Result formatOutput(OutputFormat outType, std::ostream &outPtr,
   return Result{false, ""};
 }
 
-static uint32_t *cropImage(const uint32_t *data, int width, int height, int &out_w, int &out_h) {
+static uint32_t *cropImage(const uint32_t *data, int width, int height,
+                           int &out_w, int &out_h) {
   int min_tx = width, max_tx = -1;
   int min_ty = height, max_ty = -1;
 
@@ -352,17 +358,23 @@ static uint32_t *cropImage(const uint32_t *data, int width, int height, int &out
       uint32_t pixel = data[ty * width + tx];
       unsigned char alpha = (unsigned char)((pixel >> 24) & 0xFF);
       if (alpha > 0) {
-        if (tx < min_tx) min_tx = tx;
-        if (tx > max_tx) max_tx = tx;
-        if (ty < min_ty) min_ty = ty;
-        if (ty > max_ty) max_ty = ty;
+        if (tx < min_tx)
+          min_tx = tx;
+        if (tx > max_tx)
+          max_tx = tx;
+        if (ty < min_ty)
+          min_ty = ty;
+        if (ty > max_ty)
+          max_ty = ty;
       }
     }
   }
 
   if (max_tx == -1) {
-    min_tx = 0; max_tx = 0;
-    min_ty = 0; max_ty = 0;
+    min_tx = 0;
+    max_tx = 0;
+    min_ty = 0;
+    max_ty = 0;
   }
 
   int cropped_w = max_tx - min_tx + 1;
@@ -391,12 +403,14 @@ Image loadImage(std::string filepath, bool crop) {
   }
 
   int x, y, channels;
-  uint32_t *data = (uint32_t *)(void *)stbi_load(filepath.c_str(), &x, &y, &channels, 4);
+  uint32_t *data =
+      (uint32_t *)(void *)stbi_load(filepath.c_str(), &x, &y, &channels, 4);
   if (!data) {
     return Image{};
   }
 
-  // Zero out transparent pixels (alpha == 0) to ensure uniform matching in transparent areas
+  // Zero out transparent pixels (alpha == 0) to ensure uniform matching in
+  // transparent areas
   for (int i = 0; i < x * y; ++i) {
     uint32_t pixel = data[i];
     unsigned char alpha = (unsigned char)((pixel >> 24) & 0xFF);
@@ -420,7 +434,8 @@ Image loadImage(std::string filepath, bool crop) {
     stbi_image_free(data);
   } else {
     uint32_t *copied_data = new uint32_t[static_cast<size_t>(x * y)];
-    std::memcpy(copied_data, data, static_cast<size_t>(x * y) * sizeof(uint32_t));
+    std::memcpy(copied_data, data,
+                static_cast<size_t>(x * y) * sizeof(uint32_t));
     stbi_image_free(data);
 
     img.data = copied_data;
@@ -431,21 +446,12 @@ Image loadImage(std::string filepath, bool crop) {
   return img;
 }
 
-struct SpriteTask {
-  std::string path;
-  std::string name;
-  int base_width;
-  int base_height;
-  std::vector<Image> rotations;
-};
-
 Result do_search(Config config,
-                 std::function<void(Config, const char*)> msgCallback,
+                 std::function<void(Config, const char *)> msgCallback,
                  std::function<void(Config, float, int)> progressCallback) {
   std::vector<AtlasMap> atlasmap;
   std::vector<std::string> atlas;
   std::vector<std::string> sprites;
-  std::map<std::string, std::vector<Bounds>> bounds_map;
 
   if (!config.quiet) {
     std::cout << "Scanning for atlas and sprite files..." << std::endl;
@@ -462,7 +468,7 @@ Result do_search(Config config,
   }
 
   if (!config.quiet) {
-    std::cout << "Found " << atlas.size() << " atlas candidate(s) and " 
+    std::cout << "Found " << atlas.size() << " atlas candidate(s) and "
               << sprites.size() << " sprite candidate(s)." << std::endl;
   }
 
@@ -470,7 +476,7 @@ Result do_search(Config config,
   ThreadPool pool(physical_cpus.size(), physical_cpus);
 
   std::vector<SpriteTask> sprite_tasks(sprites.size());
-  std::vector<Image> imgAtlases(atlas.size());
+  std::vector<ImageWMask> imgAtlases(atlas.size());
 
   if (!config.quiet) {
     std::cout << "Loading images..." << std::endl;
@@ -480,31 +486,35 @@ Result do_search(Config config,
 
   // Parallelize sprite loading
   for (size_t i = 0; i < sprites.size(); ++i) {
-    load_futures.push_back(pool.enqueue([i, &sprites, &sprite_tasks, &config]() {
-      const auto &sprite = sprites[i];
-      Image base_sprite = loadImage(sprite, true);
-      if (base_sprite.data == nullptr) {
-        return;
-      }
+    load_futures.push_back(
+        pool.enqueue([i, &sprites, &sprite_tasks, &config]() {
+          const auto &sprite = sprites[i];
+          Image base_sprite = loadImage(sprite, true);
+          if (base_sprite.data == nullptr) {
+            return;
+          }
 
-      SpriteTask task;
-      task.path = sprite;
-      task.name = std::filesystem::path(sprite).filename().string();
-      task.base_width = base_sprite.w;
-      task.base_height = base_sprite.h;
+          SpriteTask task;
+          task.path = sprite;
+          task.name = std::filesystem::path(sprite).filename().string();
+          task.base_width = base_sprite.w;
+          task.base_height = base_sprite.h;
 
-      for (int deg : config.rotations) {
-        task.rotations.push_back(rotateImage(base_sprite, deg));
-      }
-      delete[] base_sprite.data;
-      sprite_tasks[i] = std::move(task);
-    }));
+          for (int deg : config.rotations) {
+            task.rotations.push_back(rotateImage(base_sprite, deg));
+          }
+          delete[] base_sprite.data;
+          sprite_tasks[i] = std::move(task);
+        }));
   }
 
   // Parallelize atlas loading
   for (size_t i = 0; i < atlas.size(); ++i) {
     load_futures.push_back(pool.enqueue([i, &atlas, &imgAtlases]() {
-      imgAtlases[i] = loadImage(atlas[i], false);
+      imgAtlases[i].image = loadImage(atlas[i], false);
+      if (imgAtlases[i].image.data != nullptr) {
+        imgAtlases[i].mask = DynamicBitmask(imgAtlases[i].image.w, imgAtlases[i].image.h);
+      }
     }));
   }
 
@@ -523,102 +533,98 @@ Result do_search(Config config,
   sprite_tasks = std::move(valid_sprite_tasks);
 
   // Filter out any failed atlas images
-  std::vector<Image> valid_imgAtlases;
+  std::vector<ImageWMask> valid_imgAtlases;
   for (auto &img : imgAtlases) {
-    if (img.data != nullptr) {
-      valid_imgAtlases.push_back(img);
+    if (img.image.data != nullptr) {
+      valid_imgAtlases.push_back(std::move(img));
     }
   }
   imgAtlases = std::move(valid_imgAtlases);
 
   // Sort sprite tasks descending by base sprite area
-  std::sort(sprite_tasks.begin(), sprite_tasks.end(), [](const SpriteTask &a, const SpriteTask &b) {
-    int area_a = a.base_width * a.base_height;
-    int area_b = b.base_width * b.base_height;
-    if (area_a != area_b) {
-      return area_a > area_b;
-    }
-    return a.name < b.name;
-  });
+  std::sort(sprite_tasks.begin(), sprite_tasks.end(),
+            [](const SpriteTask &a, const SpriteTask &b) {
+              int area_a = a.base_width * a.base_height;
+              int area_b = b.base_width * b.base_height;
+              if (area_a != area_b) {
+                return area_a > area_b;
+              }
+              return a.name < b.name;
+            });
 
   if (!config.quiet) {
-    std::cout << "Loaded " << sprite_tasks.size() << " sprite(s) and " 
+    std::cout << "Loaded " << sprite_tasks.size() << " sprite(s) and "
               << imgAtlases.size() << " atlas image(s)." << std::endl;
   }
 
   if (!config.searchMethod) {
     for (auto &task : sprite_tasks) {
-      for (auto &img : task.rotations) delete[] img.data;
+      for (auto &img : task.rotations)
+        delete[] img.data;
     }
-    for (auto &img : imgAtlases) delete[] img.data;
+    for (auto &img : imgAtlases)
+      delete[] img.image.data;
     return Result{true, "Error: No search plugin selected."};
   }
 
   if (!config.quiet) {
-    std::cout << "Starting image search using plugin: " << config.searchMethod->get_name() << std::endl;
+    std::cout << "Starting image search using plugin: "
+              << config.searchMethod->get_name() << std::endl;
   }
 
   {
     std::vector<std::future<void>> futures;
     std::mutex results_mutex;
-    std::mutex bounds_mutex;
     std::mutex log_mutex;
 
     size_t total_tasks = sprite_tasks.size();
     std::atomic<size_t> completed_tasks{0};
 
     for (const auto &task : sprite_tasks) {
-      futures.push_back(pool.enqueue([&task, &imgAtlases, &atlasmap, &bounds_map, &results_mutex, &bounds_mutex, &log_mutex, &completed_tasks, total_tasks, &config, &msgCallback, &progressCallback]() {
+      futures.push_back(pool.enqueue([&task, &imgAtlases, &atlasmap,
+                                      &results_mutex, &log_mutex,
+                                      &completed_tasks, total_tasks, &config,
+                                      &msgCallback, &progressCallback]() {
         bool matched = false;
 
         for (const auto &imgSprite : task.rotations) {
-          if (matched) break;
+          if (matched)
+            break;
 
-          for (const auto &imgAtlas : imgAtlases) {
-            if (matched) break;
+          for (auto &imgAtlas : imgAtlases) {
+            if (matched)
+              break;
 
-            int max_y = imgAtlas.h - imgSprite.h + 1;
-            int max_x = imgAtlas.w - imgSprite.w + 1;
+            int max_y = imgAtlas.image.h - imgSprite.h + 1;
+            int max_x = imgAtlas.image.w - imgSprite.w + 1;
 
             for (int y = 0; y < max_y; y++) {
-              if (matched) break;
-
-              std::vector<Bounds> local_bounds;
-              {
-                std::lock_guard<std::mutex> lock(bounds_mutex);
-                if (bounds_map.contains(imgAtlas.path)) {
-                  local_bounds = bounds_map[imgAtlas.path];
-                }
-              }
+              if (matched)
+                break;
 
               for (int x = 0; x < max_x; x++) {
-                bool inside = false;
-                for (const auto &b : local_bounds) {
-                  if (x >= b.x1 && x <= b.x2 && y >= b.y1 && y <= b.y2) {
-                    inside = true;
-                    break;
-                  }
-                }
-                if (inside) continue;
+                if (imgAtlas.mask.is_skipped(x, y))
+                  continue;
 
                 if (config.searchMethod->bitwise_xor_match(
-                        imgAtlas.data, imgAtlas.w, imgSprite.data, imgSprite.w,
+                        imgAtlas.image.data, imgAtlas.image.w, imgSprite.data, imgSprite.w,
                         imgSprite.h, x, y)) {
-                  
-                  {
-                    std::lock_guard<std::mutex> lock(results_mutex);
-                    atlasmap.push_back({imgSprite.path, imgAtlas.path, x, y,
-                                        imgSprite.w, imgSprite.h, imgSprite.rot});
-                  }
 
                   {
-                    std::lock_guard<std::mutex> lock(bounds_mutex);
-                    bounds_map[imgAtlas.path].push_back({x, y, x + imgSprite.w - 1, y + imgSprite.h - 1});
+                    std::lock_guard<std::mutex> lock(results_mutex);
+                    atlasmap.push_back({imgSprite.path, imgAtlas.image.path, x, y,
+                                        imgSprite.w, imgSprite.h,
+                                        imgSprite.rot});
                   }
+
+                  imgAtlas.mask.mark_matched_bounds(x, y, imgSprite.w, imgSprite.h);
 
                   {
                     std::lock_guard<std::mutex> lock(log_mutex);
-                    std::string match_msg = "Match found: " + imgSprite.path + " in " + imgAtlas.path + " at (" + std::to_string(x) + "," + std::to_string(y) + ")";
+                    std::string match_msg = "Match found: " + imgSprite.path +
+                                            " in " + imgAtlas.image.path + " at (" +
+                                            std::to_string(x) + "," +
+                                            std::to_string(y) + ")";
                     if (msgCallback) {
                       msgCallback(config, match_msg.c_str());
                     } else if (!config.quiet) {
@@ -648,11 +654,14 @@ Result do_search(Config config,
         {
           std::lock_guard<std::mutex> lock(log_mutex);
           if (progressCallback) {
-            float percent = static_cast<float>(done) / static_cast<float>(total_tasks);
+            float percent =
+                static_cast<float>(done) / static_cast<float>(total_tasks);
             progressCallback(config, percent, static_cast<int>(total_tasks));
           } else {
             if (done % 50 == 0 || done == total_tasks) {
-              std::string progress_msg = "Progress: " + std::to_string(done) + "/" + std::to_string(total_tasks) + " sprites processed.";
+              std::string progress_msg = "Progress: " + std::to_string(done) +
+                                         "/" + std::to_string(total_tasks) +
+                                         " sprites processed.";
               if (!config.quiet) {
                 std::cout << progress_msg << "\r" << std::flush;
               }
@@ -668,7 +677,8 @@ Result do_search(Config config,
   }
 
   if (!config.quiet) {
-    std::cout << "\nSearch completed. Found " << atlasmap.size() << " match(es) total." << std::endl;
+    std::cout << "\nSearch completed. Found " << atlasmap.size()
+              << " match(es) total." << std::endl;
   }
 
   for (auto &task : sprite_tasks) {
@@ -677,7 +687,7 @@ Result do_search(Config config,
     }
   }
   for (auto &img : imgAtlases) {
-    delete[] img.data;
+    delete[] img.image.data;
   }
 
   std::string pluginName = config.searchMethod->get_name();
@@ -685,12 +695,14 @@ Result do_search(Config config,
   if (isStdout) {
     *config.output_ptr << "[CLIP START]\n";
   }
-  Result write_res = formatOutput(config.outputformat, *config.output_ptr, atlasmap, pluginName);
+  Result write_res = formatOutput(config.outputformat, *config.output_ptr,
+                                  atlasmap, pluginName);
   if (isStdout) {
     *config.output_ptr << "[CLIP END]\n";
   } else {
     if (!config.quiet) {
-      std::cout << "Writing " << config.output_file << "." << config.outputformat.suffix() << "\n";
+      std::cout << "Writing " << config.output_file << "."
+                << config.outputformat.suffix() << "\n";
     }
   }
   return write_res;
